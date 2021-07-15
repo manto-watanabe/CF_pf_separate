@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters: 
+  StackEnv:
+    Description: Stack Environment
+    Type: String
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+  InstanceType:
+    Description: EC2 Instance Type
+    Type: String
+    Default: t2.micro
+  DBuser:
+    Type: String
+    Description: Database Username
+    NoEcho: "true"
+  DatabasePassword:
+    Type: String
+    Description: Database password
+    NoEcho: "true"
+
+Resources:
+  # SecurityGroup
+  SecurityGroupEC2:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: EC2 Security Group
+      VpcId: !ImportValue myVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref SecurityGroupELB
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-ec2-sg
+        - Key: Env
+          Value: !Ref StackEnv
+  SecurityGroupELB:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ELB Security Group
+      VpcId: !ImportValue myVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-elb-sg
+        - Key: Env
+          Value: !Ref StackEnv
+  SecurityGroupRDS:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS Security Group
+      VpcId: !ImportValue myVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref SecurityGroupEC2
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          DestinationSecurityGroupId: !Ref SecurityGroupEC2
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-rds-sg
+        - Key: Env
+          Value: !Ref StackEnv
+
+#IAMRole
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: Allows EC2 instances to call AWS services
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      Path: /
+      RoleName: !Sub ${AWS::StackName}-${StackEnv}-ec2-role
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-ec2-role
+        - Key: Env
+          Value: !Ref StackEnv
+  # IAM InstanceProfile
+  InstanceProfileEC2:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub ${AWS::StackName}-${StackEnv}-ec2-ip
+      Path: /
+      Roles:
+        - !Ref EC2Role
+
+Outputs:
+    SecurityGroupEC2:
+      Value: !Ref SecurityGroupEC2
+      Export: 
+        Name: SecurityGroupEC2
+    SecurityGroupELB:
+      Value: !Ref SecurityGroupELB
+      Export: 
+        Name: SecurityGroupELB
+    SecurityGroupRDS:
+      Value: !Ref SecurityGroupRDS
+      Export: 
+        Name: SecurityGroupRDS
+    InstanceProfileEC2:
+      Value: !Ref InstanceProfileEC2
+      Export: 
+        Name: InstanceProfileEC2

@@ -1,0 +1,168 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters: 
+  StackEnv:
+    Description: Stack Environment
+    Type: String
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+  InstanceType:
+    Description: EC2 Instance Type
+    Type: String
+    Default: t2.micro
+  DBuser:
+    Type: String
+    Description: Database Username
+    NoEcho: "true"
+  DatabasePassword:
+    Type: String
+    Description: Database password
+    NoEcho: "true"
+
+Resources: 
+  myVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-myvpc
+        - Key: Env
+          Value: !Ref StackEnv
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-igw
+        - Key: Env
+          Value: !Ref StackEnv
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref myVPC
+      InternetGatewayId: !Ref InternetGateway
+  #RouteTable
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref myVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-public-rtb
+        - Key: Env
+          Value: !Ref StackEnv
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref myVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-private-rtb
+        - Key: Env
+          Value: !Ref StackEnv
+  #Route
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  #Subnet
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1a
+      VpcId: !Ref myVPC
+      CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-publicsubnetA
+        - Key: Env
+          Value: !Ref StackEnv
+  PublicSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1c
+      VpcId: !Ref myVPC
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-publicsubnetC
+        - Key: Env
+          Value: !Ref StackEnv
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1a
+      VpcId: !Ref myVPC
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-privatesubnetA
+        - Key: Env
+          Value: !Ref StackEnv
+  PrivateSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1c
+      VpcId: !Ref myVPC
+      CidrBlock: 10.0.3.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-privatesubnetC
+        - Key: Env
+          Value: !Ref StackEnv
+  # SubnetRouteTableAssociation
+  PublicRouteTableAssociation1a:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+  PublicRouteTableAssociation1c:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetC
+      RouteTableId: !Ref PublicRouteTable
+  PrivateRouteTableAssociation1a:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTable
+  PrivateRouteTableAssociation1c:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetC
+      RouteTableId: !Ref PrivateRouteTable
+
+Outputs:
+    PublicSubnetA:
+      Value: !Ref PublicSubnetA
+      Export: 
+        Name: PublicSubnetA
+    PublicSubnetC:
+      Value: !Ref PublicSubnetC
+      Export: 
+        Name: PublicSubnetC
+    myVPC:
+      Value: !Ref myVPC
+      Export: 
+        Name: myVPC
+    PrivateSubnetA:
+      Value: !Ref PrivateSubnetA
+      Export: 
+        Name: PrivateSubnetA
+    PrivateSubnetC:
+      Value: !Ref PrivateSubnetC
+      Export: 
+        Name: PrivateSubnetC

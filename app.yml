@@ -1,0 +1,172 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters: 
+  StackEnv:
+    Description: Stack Environment
+    Type: String
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+  InstanceType:
+    Description: EC2 Instance Type
+    Type: String
+    Default: t2.micro
+  DBuser:
+    Type: String
+    Description: Database Username
+    NoEcho: "true"
+  DatabasePassword:
+    Type: String
+    Description: Database password
+    NoEcho: "true"
+
+Resources:
+  #EC2
+  EC2A:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: ap-northeast-1a
+      KeyName: !Ref KeyName
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      Monitoring: false
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: "0"
+          SubnetId: !ImportValue PublicSubnetA
+          GroupSet:
+            - !ImportValue SecurityGroupEC2
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-ec2a
+        - Key: Env
+          Value: !Ref StackEnv
+      IamInstanceProfile: !ImportValue InstanceProfileEC2
+  EC2C:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: ap-northeast-1c
+      KeyName: !Ref KeyName
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      Monitoring: false
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: "0"
+          SubnetId: !ImportValue PublicSubnetC
+          GroupSet:
+            - !ImportValue SecurityGroupEC2
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-ec2c
+        - Key: Env
+          Value: !Ref StackEnv
+      IamInstanceProfile: !ImportValue InstanceProfileEC2
+
+  #ELB
+  ElasticLoadBalancer: 
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties: 
+      Name: !Sub ${AWS::StackName}-${StackEnv}-elb
+      Scheme: "internet-facing"
+      LoadBalancerAttributes: 
+        - Key: "deletion_protection.enabled"
+          Value: false
+        - Key: "idle_timeout.timeout_seconds"
+          Value: 120
+      SecurityGroups:
+        - !ImportValue SecurityGroupELB
+      Subnets: 
+        - !ImportValue PublicSubnetA
+        - !ImportValue PublicSubnetC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-elb
+        - Key: Env
+          Value: !Ref StackEnv
+  TargetGroup: 
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties: 
+      VpcId: !ImportValue myVPC
+      Name: !Sub ${AWS::StackName}-${StackEnv}-tg
+      Protocol: HTTP
+      Port: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: "/"
+      HealthCheckPort: "traffic-port"
+      HealthyThresholdCount: 5
+      UnhealthyThresholdCount: 2
+      HealthCheckTimeoutSeconds: 5
+      HealthCheckIntervalSeconds: 30
+      Matcher: 
+        HttpCode: 200
+      Targets: 
+        - Id: !Ref EC2A
+          Port: 80
+        - Id: !Ref EC2C
+          Port: 80
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref ElasticLoadBalancer
+      Port: 80
+      Protocol: HTTP
+  #RDS
+  rdsDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: 20
+      DBInstanceClass: db.t2.micro
+      AvailabilityZone: ap-northeast-1a
+      DBInstanceIdentifier: !Sub ${AWS::StackName}-${StackEnv}-rds
+      DBSubnetGroupName: !Ref rdsDBSubnetGroup
+      Engine: mysql
+      EngineVersion: 8.0.20 
+      MasterUsername: !Ref DBuser
+      MasterUserPassword: !Ref DatabasePassword
+      MultiAZ: false
+      StorageType: gp2
+      VPCSecurityGroups:
+        - !ImportValue SecurityGroupRDS
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-rds
+        - Key: Env
+          Value: !Ref StackEnv
+  #DBSubnetGroup
+  rdsDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: DBSubnetGroup from cfn
+      SubnetIds:
+        - !ImportValue PrivateSubnetA
+        - !ImportValue PrivateSubnetC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-dbsubnetgroup
+        - Key: Env
+          Value: !Ref StackEnv
+  #S3bucket
+  s3Bucket:
+    Type: AWS::S3::Bucket
+    Properties: 
+      AccessControl: Private
+      BucketName: !Sub ${AWS::StackName}-s3bucket-dev
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${StackEnv}-s3bucket
+        - Key: Env
+          Value: !Ref StackEnv
+      VersioningConfiguration:
+        Status: Suspended
